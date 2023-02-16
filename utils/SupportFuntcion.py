@@ -80,8 +80,8 @@ def NormalizeMesh(mesh):
 
     # Scale the pivot
     v *= scale
-    normalize_mesh = o3d.geometry.TriangleMesh(Vector3d(v),Vector3i(mesh.faces))
-    return normalize_mesh
+    normalize_mesh = o3d.geometry.TriangleMesh(Vector3d(v),Vector3i(mesh.triangles))
+    return normalize_mesh, pivot, scale
 
 def ReadObj(file_path):
     mesh = o3d.io.read_triangle_mesh(file_path)

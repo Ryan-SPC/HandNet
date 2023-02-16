@@ -112,7 +112,7 @@ class HandNet:
         mesh, mesh_v, mesh_f = Mesh.ReadObj(mesh_file)
         mesh.compute_vertex_normals()
         mesh_vertex_normals = np.asarray(mesh.vertex_normals)
-        # mesh_v, translate, scale = Mesh.NormalizeVertice(mesh_v)
+        mesh_v, translate, scale = Mesh.NormalizeVertice(mesh_v)
         mesh_normalized = o3d.geometry.TriangleMesh(Vector3d(mesh_v), Vector3i(mesh_f))
         Mesh.WriteObj(mesh_file.replace(".obj", "_normalized.obj"), mesh_v, mesh_f)
 
@@ -231,19 +231,22 @@ class HandNet:
         data = self.generate_bone_net_input(data, vox, joints)
         adj = self.predict_connection(data, self.bone_net, root_id, vox)
 
-        return joint, adj
+        # view
+        view = sf.CreateDisplayWindow()
+        mesh_ls = o3d.geometry.LineSet.create_from_triangle_mesh(mesh)
+        mesh_ls.colors = o3d.utility.Vector3dVector([[0, 0, 0] for i in range(len(mesh_ls.lines))])
+        view.add_geometry(mesh_ls)
+        sf.DrawVertices(view, joints)
+        sf.DrawSkeleton(view,joints,adj)
+
+        ctr = view.get_view_control()
+        ctr.set_front([0.0001,1,0])
+        view.run()
+
+        return joints, adj
 
 
-        # view = sf.CreateDisplayWindow()
-        # mesh_ls = o3d.geometry.LineSet.create_from_triangle_mesh(mesh)
-        # mesh_ls.colors = o3d.utility.Vector3dVector([[0, 0, 0] for i in range(len(mesh_ls.lines))])
-        # view.add_geometry(mesh_ls)
-        # sf.DrawVertices(view, joints)
-        # sf.DrawSkeleton(view,joints,adj)
-
-        # ctr = view.get_view_control()
-        # ctr.set_front([0.0001,1,0])
-        # view.run()
+        
 
 if __name__ == '__main__':
     net = HandNet()

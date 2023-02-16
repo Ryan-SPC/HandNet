@@ -54,6 +54,7 @@ class RigNet:
         self.wristNet.eval()
         wristNet_checkpoint = torch.load('checkpoints/wristnet/model_best.pth.tar')
         self.wristNet.load_state_dict(wristNet_checkpoint['state_dict'])
+        self.wristNet.to(device)
 
     
     def predict_joints(self, data, joint_net, vox, threshold = 1e-5, bandwidth = None):
@@ -180,6 +181,8 @@ class RigNet:
         data.pair_attr = pair_attr
         data.joints_batch = joints_batch
         data.pairs_batch = pairs_batch
+        data.left_wrist = pred_joints[0] # no use
+        data.right_wrist = pred_joints[0] # no use
         data = data.to(device)
         return data
 
@@ -189,6 +192,18 @@ class RigNet:
             root_prob = torch.sigmoid(root_prob).data.cpu().numpy()
         root_id = np.argmax(root_prob)
         return root_id
+
+    def predict_wrist_id(self, data, wrist_net):
+        left = 0
+        right = 0
+        with torch.no_grad():
+            prob = wrist_net(data)
+            print(prob)
+            left = torch.argmax(prob[0], dim = 0)[1].item()
+            right = torch.argmax(prob[0], dim = 0)[2].item()
+            # print(prob)
+
+        return left, right 
 
     def predict_connection(self, data, bone_net, root_id, vox):
         pred_joints = data.joints.data.cpu().numpy()
@@ -230,18 +245,11 @@ class RigNet:
         joints, _ = flip(joints)
         self.generate_bone_net_input(data, vox, joints)
         root_id = self.predict_root_id(data, self.rootNet)
+        # left_id, right_id = self.predict_wrist_id(data, self.wristNet)
         adj = self.predict_connection(data, self.bone_net, root_id, vox)
-        # a = []
-        # a.append(joints[root_id])
-        # a = np.array(a)
 
-
-        
-
-
-
+        # view
         view = sf.CreateDisplayWindow()
-        
         mesh_ls = o3d.geometry.LineSet.create_from_triangle_mesh(mesh)
         mesh_ls.colors = o3d.utility.Vector3dVector([[0, 0, 0] for i in range(len(mesh_ls.lines))])
         view.add_geometry(mesh_ls)
@@ -249,6 +257,7 @@ class RigNet:
         # sf.DrawVertices(view, a, radius=0.01, color=[0,1,0])
         sf.DrawSkeleton(view,joints,adj)
         view.run()
+        return joints, adj
 
 if __name__ == '__main__':
     net = RigNet()
@@ -256,4 +265,3 @@ if __name__ == '__main__':
     id = '239'
     mesh_file = './data/'+id+'.obj'
     net.Run(mesh_file)
-    pass
