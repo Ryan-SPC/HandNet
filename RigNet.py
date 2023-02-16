@@ -11,12 +11,14 @@ import itertools as it
 
 from models.GCN import JOINTNET_MASKNET_MEANSHIFT as JOINTNET
 from models.PairCls_GCN import PairCls as BONENET
+from models.ROOT_GCN import ROOTNET
+from models.WRIST_GCN import WRISTNET
 import utils.mesh_utils as Mesh
 from utils.mesh_utils import Vector3d, Vector3i
 from utils import binvox_rw
 
 import utils.SupportFuntcion as sf
-from utils.mst_utils import sample_on_bone, inside_check, increase_cost_for_outside_bone, primMST, flip
+from utils.mst_utils import sample_on_bone, inside_check, increase_cost_for_outside_bone, primMST, flip, primMST_symmetry
 from utils.tree_utils import TreeNode
 from utils.meanshift_utils import nms_meanshift, meanshift_cluster
 
@@ -28,7 +30,7 @@ class RigNet:
         pass
 
     def LoadModel(self):
-        print("Load RigNEt Models!")
+        print("Load RigNet Models!")
         self.joint_net = JOINTNET()
         self.joint_net.to(device)
         self.joint_net.eval()
@@ -38,9 +40,21 @@ class RigNet:
         self.bone_net = BONENET()
         self.bone_net.to(device)
         self.bone_net.eval()
-        bone_net_checkpoint = torch.load('checkpoints/hand_bonenet/model_best.pth.tar')
+        bone_net_checkpoint = torch.load('checkpoints/bonenet/model_best.pth.tar')
         self.bone_net.load_state_dict(bone_net_checkpoint['state_dict'])
         self.is_loaded = True
+
+        self.rootNet = ROOTNET()
+        self.rootNet.to(device)
+        self.rootNet.eval()
+        rootNet_checkpoint = torch.load('checkpoints/rootnet/model_best.pth.tar')
+        self.rootNet.load_state_dict(rootNet_checkpoint['state_dict'])
+
+        self.wristNet = WRISTNET()
+        self.wristNet.eval()
+        wristNet_checkpoint = torch.load('checkpoints/wristnet/model_best.pth.tar')
+        self.wristNet.load_state_dict(wristNet_checkpoint['state_dict'])
+
     
     def predict_joints(self, data, joint_net, vox, threshold = 1e-5, bandwidth = None):
         data_displacement, _, attn_pred, bandwidth_pred = joint_net(data)
@@ -169,7 +183,15 @@ class RigNet:
         data = data.to(device)
         return data
 
+    def predict_root_id(self, data, root_net):
+        with torch.no_grad():
+            root_prob, label = root_net(data, shuffle=False)
+            root_prob = torch.sigmoid(root_prob).data.cpu().numpy()
+        root_id = np.argmax(root_prob)
+        return root_id
+
     def predict_connection(self, data, bone_net, root_id, vox):
+        pred_joints = data.joints.data.cpu().numpy()
         with torch.no_grad():
             connect_prob, _ = bone_net(data, permute_joints=False)
             connect_prob = torch.sigmoid(connect_prob)
@@ -178,13 +200,12 @@ class RigNet:
         prob_matrix = np.zeros((len(data.joints), len(data.joints)))
         prob_matrix[pair_idx[:, 0], pair_idx[:, 1]] = connect_prob.data.cpu().numpy().squeeze()
         prob_matrix = prob_matrix + prob_matrix.transpose()
-
-        cost_matrix = -np.log(prob_matrix + 1e-10)
-        pred_joints = data.joints.data.cpu().numpy()
+        cost_matrix = -np.log(prob_matrix + 1e-10)        
         cost_matrix = increase_cost_for_outside_bone(cost_matrix, pred_joints, vox)
 
 
-        parent, key = primMST(cost_matrix, root_id)
+        # parent, key = primMST(cost_matrix, root_id)
+        parent, key, root_id = primMST_symmetry(cost_matrix, root_id, pred_joints)
         joint_count = len(parent)
         adj = np.zeros((joint_count, joint_count))
 
@@ -204,16 +225,29 @@ class RigNet:
         mesh, data, vox = self.create_input_data(mesh_file)
         
         joints = self.predict_joints(data, self.joint_net, vox)
+
+        # flip left to right
+        joints, _ = flip(joints)
+        self.generate_bone_net_input(data, vox, joints)
+        root_id = self.predict_root_id(data, self.rootNet)
+        adj = self.predict_connection(data, self.bone_net, root_id, vox)
+        # a = []
+        # a.append(joints[root_id])
+        # a = np.array(a)
+
+
         
 
 
 
         view = sf.CreateDisplayWindow()
+        
         mesh_ls = o3d.geometry.LineSet.create_from_triangle_mesh(mesh)
         mesh_ls.colors = o3d.utility.Vector3dVector([[0, 0, 0] for i in range(len(mesh_ls.lines))])
         view.add_geometry(mesh_ls)
         sf.DrawVertices(view, joints)
-        # sf.DrawSkeleton(view,joints,adj)
+        # sf.DrawVertices(view, a, radius=0.01, color=[0,1,0])
+        sf.DrawSkeleton(view,joints,adj)
         view.run()
 
 if __name__ == '__main__':
